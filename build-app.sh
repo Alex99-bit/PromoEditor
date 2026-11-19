@@ -11,6 +11,8 @@ APP="dist/Promo Editor.app"
 mkdir -p "$APP/Contents/MacOS"
 cp Info.plist "$APP/Contents/Info.plist"
 cp "$BIN_PATH/PromoEditor" "$APP/Contents/MacOS/PromoEditor"
+cp "$BIN_PATH/PromoEditorCLI" dist/PromoEditorCLI
 codesign --force --deep --sign - "$APP"
+codesign --force --sign - dist/PromoEditorCLI
 
 echo "Aplicación creada en: $PWD/$APP"

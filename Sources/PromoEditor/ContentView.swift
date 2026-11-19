@@ -1,5 +1,6 @@
 import AVKit
 import SwiftUI
+import PromoEditorCore
 import UniformTypeIdentifiers
 
 struct ContentView: View {
@@ -211,6 +212,54 @@ struct ContentView: View {
                 }
                 Spacer()
             }
+
+            VStack(alignment: .leading, spacing: 7) {
+                HStack {
+                    Label("MÚSICA DE FONDO", systemImage: "music.note")
+                        .font(.system(size: 10, weight: .bold))
+                        .tracking(0.5)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Button {
+                        editor.chooseMusic()
+                    } label: {
+                        Label(editor.backgroundMusicURL == nil ? "Añadir" : "Cambiar", systemImage: "plus")
+                    }
+                    .font(.caption)
+                    .buttonStyle(.borderless)
+                }
+                if let musicURL = editor.backgroundMusicURL {
+                    HStack(spacing: 5) {
+                        Text(musicURL.lastPathComponent)
+                            .font(.system(size: 10))
+                            .lineLimit(1)
+                        Spacer(minLength: 0)
+                        Button {
+                            editor.removeMusic()
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                        }
+                        .buttonStyle(.borderless)
+                        .help("Quitar música")
+                    }
+                    HStack(spacing: 8) {
+                        Image(systemName: "speaker.wave.1")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                        Slider(value: $editor.musicVolume, in: 0...0.6)
+                        Text("\(Int(editor.musicVolume * 100))%")
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                    }
+                } else {
+                    Text("Audio original silenciado.")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .padding(9)
+            .background(Color.primary.opacity(0.035))
+            .clipShape(RoundedRectangle(cornerRadius: 8))
 
             if editor.timeline.isEmpty {
                 ContentUnavailableView(

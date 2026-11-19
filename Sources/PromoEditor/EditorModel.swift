@@ -3,6 +3,7 @@ import AVFoundation
 import Combine
 import Foundation
 import ImageIO
+import PromoEditorCore
 import UniformTypeIdentifiers
 
 @MainActor
@@ -13,14 +14,16 @@ final class EditorModel: ObservableObject {
     @Published var selectedLibraryPath: String?
     @Published var selectedTimelineID: UUID?
     @Published var sourceFolderURL: URL?
+    @Published var backgroundMusicURL: URL?
+    @Published var musicVolume = 0.35
     @Published var isLoading = false
     @Published var isExporting = false
     @Published var statusMessage = "Abre una carpeta de videos para empezar."
     @Published var alertMessage: String?
 
-    init() {
+    init(shouldAutoLoadDefaultFolder: Bool = true) {
         let firstRunFolder = URL(fileURLWithPath: "/Volumes/AlexCoSSD/Videos/Limpieza/Seleccionados")
-        if FileManager.default.fileExists(atPath: firstRunFolder.path) {
+        if shouldAutoLoadDefaultFolder, FileManager.default.fileExists(atPath: firstRunFolder.path) {
             loadFolder(firstRunFolder)
         }
     }
@@ -165,6 +168,23 @@ final class EditorModel: ObservableObject {
         statusMessage = "Recorte actualizado: \(clip.name)"
     }
 
+    func chooseMusic() {
+        let panel = NSOpenPanel()
+        panel.title = "Elige música de fondo"
+        panel.allowedContentTypes = [.audio]
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        backgroundMusicURL = url
+        statusMessage = "Música añadida: \(url.lastPathComponent)"
+    }
+
+    func removeMusic() {
+        backgroundMusicURL = nil
+        statusMessage = "Se exportará sin música; el audio original permanece silenciado."
+    }
+
     func saveProject() {
         let panel = NSSavePanel()
         panel.title = "Guarda el proyecto de edición"
@@ -172,7 +192,12 @@ final class EditorModel: ObservableObject {
         panel.allowedContentTypes = [.json]
         guard panel.runModal() == .OK, let url = panel.url else { return }
         do {
-            let project = PromoProject(sourceFolderPath: sourceFolderURL?.path, clips: timeline)
+            let project = PromoProject(
+                sourceFolderPath: sourceFolderURL?.path,
+                clips: timeline,
+                musicPath: backgroundMusicURL?.path,
+                musicVolume: musicVolume
+            )
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
             try encoder.encode(project).write(to: url, options: .atomic)
@@ -190,10 +215,17 @@ final class EditorModel: ObservableObject {
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = false
         guard panel.runModal() == .OK, let url = panel.url else { return }
+        openProject(at: url)
+    }
+
+    func openProject(at url: URL) {
         do {
             let project = try JSONDecoder().decode(PromoProject.self, from: Data(contentsOf: url))
             timeline = project.clips.filter { FileManager.default.fileExists(atPath: $0.sourcePath) }
             sourceFolderURL = project.sourceFolderPath.map { URL(fileURLWithPath: $0) }
+            backgroundMusicURL = project.musicPath.map { URL(fileURLWithPath: $0) }
+                .flatMap { FileManager.default.fileExists(atPath: $0.path) ? $0 : nil }
+            musicVolume = max(0, min(project.musicVolume, 1))
             selectedTimelineID = timeline.first?.id
             previewURL = timeline.first?.url
             statusMessage = "Proyecto abierto · \(timeline.count) tomas."
@@ -216,7 +248,13 @@ final class EditorModel: ObservableObject {
         let clips = timeline
         Task {
             do {
-                try await Self.render(clips: clips, to: outputURL)
+                try await VideoExporter.render(
+                    clips: clips,
+                    to: outputURL,
+                    musicURL: backgroundMusicURL,
+                    musicVolume: musicVolume,
+                    overwriteExistingFile: true
+                )
                 statusMessage = "Exportación terminada · \(outputURL.lastPathComponent)"
             } catch {
                 alertMessage = "No se pudo exportar el video: \(error.localizedDescription)"
@@ -226,117 +264,6 @@ final class EditorModel: ObservableObject {
         }
     }
 
-    nonisolated private static func render(clips: [TimelineClip], to outputURL: URL) async throws {
-        let composition = AVMutableComposition()
-        guard let videoCompositionTrack = composition.addMutableTrack(
-            withMediaType: .video,
-            preferredTrackID: kCMPersistentTrackID_Invalid
-        ) else {
-            throw ExportError.couldNotCreateTrack
-        }
-
-        let audioCompositionTrack = composition.addMutableTrack(
-            withMediaType: .audio,
-            preferredTrackID: kCMPersistentTrackID_Invalid
-        )
-        let canvas = CGSize(width: 1080, height: 1920)
-        var instructions: [AVMutableVideoCompositionInstruction] = []
-        var cursor = CMTime.zero
-
-        for clip in clips {
-            let asset = AVURLAsset(url: clip.url)
-            let tracks = try await asset.loadTracks(withMediaType: .video)
-            guard let sourceVideoTrack = tracks.first else { continue }
-            let sourceAudioTrack = try await asset.loadTracks(withMediaType: .audio).first
-            let naturalSize = try await sourceVideoTrack.load(.naturalSize)
-            let preferredTransform = try await sourceVideoTrack.load(.preferredTransform)
-            let start = CMTime(seconds: clip.trimStart, preferredTimescale: 600)
-            let duration = CMTime(seconds: clip.selectedDuration, preferredTimescale: 600)
-            guard CMTimeGetSeconds(duration) > 0.05 else { continue }
-            let range = CMTimeRange(start: start, duration: duration)
-
-            try videoCompositionTrack.insertTimeRange(range, of: sourceVideoTrack, at: cursor)
-            if let sourceAudioTrack, let audioCompositionTrack {
-                try? audioCompositionTrack.insertTimeRange(range, of: sourceAudioTrack, at: cursor)
-            }
-
-            let sourceRect = CGRect(origin: .zero, size: naturalSize).applying(preferredTransform)
-            let normalized = preferredTransform.concatenating(
-                CGAffineTransform(translationX: -sourceRect.minX, y: -sourceRect.minY)
-            )
-            let scale = max(canvas.width / max(sourceRect.width, 1), canvas.height / max(sourceRect.height, 1))
-            let finalTransform = normalized
-                .concatenating(CGAffineTransform(scaleX: scale, y: scale))
-                .concatenating(CGAffineTransform(
-                    translationX: (canvas.width - sourceRect.width * scale) / 2,
-                    y: (canvas.height - sourceRect.height * scale) / 2
-                ))
-
-            let layer = AVMutableVideoCompositionLayerInstruction(assetTrack: videoCompositionTrack)
-            layer.setTransform(finalTransform, at: cursor)
-            let instruction = AVMutableVideoCompositionInstruction()
-            instruction.timeRange = CMTimeRange(start: cursor, duration: duration)
-            instruction.backgroundColor = NSColor.black.cgColor
-            instruction.layerInstructions = [layer]
-            instructions.append(instruction)
-            cursor = CMTimeAdd(cursor, duration)
-        }
-
-        guard !instructions.isEmpty else { throw ExportError.noUsableVideo }
-        let videoComposition = AVMutableVideoComposition()
-        videoComposition.renderSize = canvas
-        videoComposition.frameDuration = CMTime(value: 1, timescale: 30)
-        videoComposition.instructions = instructions
-
-        if FileManager.default.fileExists(atPath: outputURL.path) {
-            try FileManager.default.removeItem(at: outputURL)
-        }
-        guard let session = AVAssetExportSession(
-            asset: composition,
-            presetName: AVAssetExportPresetHighestQuality
-        ) else {
-            throw ExportError.couldNotCreateExportSession
-        }
-        session.outputURL = outputURL
-        session.outputFileType = .mp4
-        session.videoComposition = videoComposition
-        session.shouldOptimizeForNetworkUse = true
-        let sessionBox = ExportSessionBox(session)
-
-        try await withCheckedThrowingContinuation { continuation in
-            sessionBox.session.exportAsynchronously {
-                if sessionBox.session.status == .completed {
-                    continuation.resume()
-                } else {
-                    continuation.resume(throwing: sessionBox.session.error ?? ExportError.exportFailed)
-                }
-            }
-        }
-    }
-}
-
-private final class ExportSessionBox: @unchecked Sendable {
-    let session: AVAssetExportSession
-
-    init(_ session: AVAssetExportSession) {
-        self.session = session
-    }
-}
-
-private enum ExportError: LocalizedError {
-    case couldNotCreateTrack
-    case noUsableVideo
-    case couldNotCreateExportSession
-    case exportFailed
-
-    var errorDescription: String? {
-        switch self {
-        case .couldNotCreateTrack: "No se pudo preparar la pista de video."
-        case .noUsableVideo: "No hay tomas válidas para exportar."
-        case .couldNotCreateExportSession: "No se pudo iniciar el exportador."
-        case .exportFailed: "La exportación falló."
-        }
-    }
 }
 
 private extension Array {
