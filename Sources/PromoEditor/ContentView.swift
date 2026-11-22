@@ -261,6 +261,8 @@ struct ContentView: View {
             .background(Color.primary.opacity(0.035))
             .clipShape(RoundedRectangle(cornerRadius: 8))
 
+            vfxPanel
+
             if editor.timeline.isEmpty {
                 ContentUnavailableView(
                     "Tu promocional",
@@ -288,6 +290,51 @@ struct ContentView: View {
             }
         }
         .padding(14)
+    }
+
+    private var vfxPanel: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label("EFECTOS VISUALES", systemImage: "sparkles")
+                .font(.system(size: 10, weight: .bold))
+                .tracking(0.5)
+                .foregroundStyle(.secondary)
+
+            TextField("Título de apertura", text: $editor.vfxSettings.openingText)
+                .textFieldStyle(.roundedBorder)
+            TextField("Texto final / llamada a la acción", text: $editor.vfxSettings.closingText)
+                .textFieldStyle(.roundedBorder)
+
+            HStack(spacing: 6) {
+                if let logoPath = editor.vfxSettings.logoPath {
+                    Text(URL(fileURLWithPath: logoPath).lastPathComponent)
+                        .font(.system(size: 10))
+                        .lineLimit(1)
+                    Spacer(minLength: 0)
+                    Button {
+                        editor.removeLogo()
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Quitar logo")
+                } else {
+                    Button {
+                        editor.chooseLogo()
+                    } label: {
+                        Label("Añadir logo", systemImage: "photo")
+                    }
+                    .font(.caption)
+                    .buttonStyle(.borderless)
+                }
+            }
+
+            Text("Títulos animados y logo en zona segura para vertical.")
+                .font(.system(size: 10))
+                .foregroundStyle(.tertiary)
+        }
+        .padding(9)
+        .background(Color.accentColor.opacity(0.045))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 
     private var footer: some View {

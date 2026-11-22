@@ -13,6 +13,7 @@ verticales a partir de videos existentes.
   asistente proponga o edite la lista de tomas.
 - Exportar proyectos desde Terminal con `PromoEditorCLI`, usando el mismo
   motor que la app.
+- Añadir títulos animados de apertura y cierre, además de un logo superpuesto.
 
 Los originales no se modifican. El exportador crea un archivo nuevo; el
 encuadre vertical rellena el lienzo recortando el centro de cada toma.
@@ -45,6 +46,6 @@ open -a "dist/Promo Editor.app" --args --project "/ruta/al/proyecto.promo.json"
 
 ## Próximas mejoras posibles
 
-Subtítulos y títulos, transiciones, plantillas de marca, más formatos de
-exportación y una conexión más directa para que el asistente aplique un plan
+Corrección de color, transiciones entre tomas, plantillas de marca, más formatos
+de exportación y una conexión más directa para que el asistente aplique un plan
 de edición.

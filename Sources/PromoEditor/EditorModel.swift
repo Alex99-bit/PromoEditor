@@ -16,6 +16,7 @@ final class EditorModel: ObservableObject {
     @Published var sourceFolderURL: URL?
     @Published var backgroundMusicURL: URL?
     @Published var musicVolume = 0.35
+    @Published var vfxSettings = VFXSettings()
     @Published var isLoading = false
     @Published var isExporting = false
     @Published var statusMessage = "Abre una carpeta de videos para empezar."
@@ -185,6 +186,23 @@ final class EditorModel: ObservableObject {
         statusMessage = "Se exportará sin música; el audio original permanece silenciado."
     }
 
+    func chooseLogo() {
+        let panel = NSOpenPanel()
+        panel.title = "Elige el logo para el video"
+        panel.allowedContentTypes = [.image]
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        vfxSettings.logoPath = url.path
+        statusMessage = "Logo añadido: \(url.lastPathComponent)"
+    }
+
+    func removeLogo() {
+        vfxSettings.logoPath = nil
+        statusMessage = "Logo quitado."
+    }
+
     func saveProject() {
         let panel = NSSavePanel()
         panel.title = "Guarda el proyecto de edición"
@@ -196,7 +214,8 @@ final class EditorModel: ObservableObject {
                 sourceFolderPath: sourceFolderURL?.path,
                 clips: timeline,
                 musicPath: backgroundMusicURL?.path,
-                musicVolume: musicVolume
+                musicVolume: musicVolume,
+                vfx: vfxSettings
             )
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
@@ -226,6 +245,11 @@ final class EditorModel: ObservableObject {
             backgroundMusicURL = project.musicPath.map { URL(fileURLWithPath: $0) }
                 .flatMap { FileManager.default.fileExists(atPath: $0.path) ? $0 : nil }
             musicVolume = max(0, min(project.musicVolume, 1))
+            vfxSettings = project.vfx
+            if let logoPath = vfxSettings.logoPath,
+               !FileManager.default.fileExists(atPath: logoPath) {
+                vfxSettings.logoPath = nil
+            }
             selectedTimelineID = timeline.first?.id
             previewURL = timeline.first?.url
             statusMessage = "Proyecto abierto · \(timeline.count) tomas."
@@ -253,6 +277,7 @@ final class EditorModel: ObservableObject {
                     to: outputURL,
                     musicURL: backgroundMusicURL,
                     musicVolume: musicVolume,
+                    vfx: vfxSettings,
                     overwriteExistingFile: true
                 )
                 statusMessage = "Exportación terminada · \(outputURL.lastPathComponent)"
