@@ -16,6 +16,7 @@ final class EditorModel: ObservableObject {
     @Published var sourceFolderURL: URL?
     @Published var backgroundMusicURL: URL?
     @Published var musicVolume = 0.35
+    @Published var transitionDuration = 0.35
     @Published var vfxSettings = VFXSettings()
     @Published var isLoading = false
     @Published var isExporting = false
@@ -215,6 +216,7 @@ final class EditorModel: ObservableObject {
                 clips: timeline,
                 musicPath: backgroundMusicURL?.path,
                 musicVolume: musicVolume,
+                transitionDuration: transitionDuration,
                 vfx: vfxSettings
             )
             let encoder = JSONEncoder()
@@ -245,6 +247,7 @@ final class EditorModel: ObservableObject {
             backgroundMusicURL = project.musicPath.map { URL(fileURLWithPath: $0) }
                 .flatMap { FileManager.default.fileExists(atPath: $0.path) ? $0 : nil }
             musicVolume = max(0, min(project.musicVolume, 1))
+            transitionDuration = max(0, min(project.transitionDuration, 1))
             vfxSettings = project.vfx
             if let logoPath = vfxSettings.logoPath,
                !FileManager.default.fileExists(atPath: logoPath) {
@@ -277,6 +280,7 @@ final class EditorModel: ObservableObject {
                     to: outputURL,
                     musicURL: backgroundMusicURL,
                     musicVolume: musicVolume,
+                    transitionDuration: transitionDuration,
                     vfx: vfxSettings,
                     overwriteExistingFile: true
                 )

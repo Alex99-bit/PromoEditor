@@ -9,6 +9,7 @@ public enum VideoExporter {
         to outputURL: URL,
         musicURL: URL? = nil,
         musicVolume: Double = 0.35,
+        transitionDuration: Double = 0,
         vfx: VFXSettings = VFXSettings(),
         overwriteExistingFile: Bool = false
     ) async throws {
@@ -20,16 +21,9 @@ public enum VideoExporter {
         }
 
         let composition = AVMutableComposition()
-        guard let videoCompositionTrack = composition.addMutableTrack(
-            withMediaType: .video,
-            preferredTrackID: kCMPersistentTrackID_Invalid
-        ) else {
-            throw ExportError.couldNotCreateTrack
-        }
-
         let canvas = CGSize(width: 1080, height: 1920)
         var instructions: [AVMutableVideoCompositionInstruction] = []
-        var cursor = CMTime.zero
+        var segments: [VideoSegment] = []
 
         for clip in clips {
             let asset = AVURLAsset(url: clip.url)
@@ -40,9 +34,6 @@ public enum VideoExporter {
             let start = CMTime(seconds: clip.trimStart, preferredTimescale: 600)
             let duration = CMTime(seconds: clip.selectedDuration, preferredTimescale: 600)
             guard CMTimeGetSeconds(duration) > 0.05 else { continue }
-            let range = CMTimeRange(start: start, duration: duration)
-
-            try videoCompositionTrack.insertTimeRange(range, of: sourceVideoTrack, at: cursor)
 
             let sourceRect = CGRect(origin: .zero, size: naturalSize).applying(preferredTransform)
             let normalized = preferredTransform.concatenating(
@@ -56,17 +47,88 @@ public enum VideoExporter {
                     y: (canvas.height - sourceRect.height * scale) / 2
                 ))
 
-            let layer = AVMutableVideoCompositionLayerInstruction(assetTrack: videoCompositionTrack)
-            layer.setTransform(finalTransform, at: cursor)
-            let instruction = AVMutableVideoCompositionInstruction()
-            instruction.timeRange = CMTimeRange(start: cursor, duration: duration)
-            instruction.backgroundColor = NSColor.black.cgColor
-            instruction.layerInstructions = [layer]
-            instructions.append(instruction)
-            cursor = CMTimeAdd(cursor, duration)
+            segments.append(VideoSegment(
+                asset: asset,
+                sourceTrack: sourceVideoTrack,
+                sourceRange: CMTimeRange(start: start, duration: duration),
+                duration: duration,
+                transform: finalTransform
+            ))
         }
 
-        guard !instructions.isEmpty else { throw ExportError.noUsableVideo }
+        guard !segments.isEmpty else { throw ExportError.noUsableVideo }
+
+        let requestedTransition = max(0, min(transitionDuration, 1.0))
+        let shortestClip = segments.map { CMTimeGetSeconds($0.duration) }.min() ?? 0
+        let overlap = segments.count > 1
+            ? CMTime(seconds: min(requestedTransition, shortestClip / 2), preferredTimescale: 600)
+            : .zero
+        let trackCount = CMTimeCompare(overlap, .zero) > 0 ? 2 : 1
+        let videoTracks = try (0..<trackCount).map { _ -> AVMutableCompositionTrack in
+            guard let track = composition.addMutableTrack(
+                withMediaType: .video,
+                preferredTrackID: kCMPersistentTrackID_Invalid
+            ) else {
+                throw ExportError.couldNotCreateTrack
+            }
+            return track
+        }
+        var startTimes: [CMTime] = []
+        var endTimes: [CMTime] = []
+        var cursor = CMTime.zero
+
+        for (index, segment) in segments.enumerated() {
+            let start = index == 0 ? CMTime.zero : CMTimeSubtract(cursor, overlap)
+            let compositionTrack = videoTracks[index % videoTracks.count]
+            try compositionTrack.insertTimeRange(segment.sourceRange, of: segment.sourceTrack, at: start)
+            startTimes.append(start)
+            cursor = CMTimeAdd(start, segment.duration)
+            endTimes.append(cursor)
+        }
+
+        for index in segments.indices {
+            let normalStart = index == 0 ? startTimes[index] : endTimes[index - 1]
+            let normalEnd = index == segments.count - 1 ? endTimes[index] : startTimes[index + 1]
+            if CMTimeCompare(normalEnd, normalStart) > 0 {
+                instructions.append(makeVideoInstruction(
+                    range: CMTimeRange(start: normalStart, end: normalEnd),
+                    layers: [makeLayerInstruction(
+                        for: segments[index],
+                        compositionTrack: videoTracks[index % videoTracks.count],
+                        at: startTimes[index]
+                    )]
+                ))
+            }
+
+            guard index < segments.count - 1, CMTimeCompare(overlap, .zero) > 0 else { continue }
+            let transitionRange = CMTimeRange(start: startTimes[index + 1], end: endTimes[index])
+            let outgoingLayer = makeLayerInstruction(
+                for: segments[index],
+                compositionTrack: videoTracks[index % videoTracks.count],
+                at: startTimes[index]
+            )
+            outgoingLayer.setOpacityRamp(
+                fromStartOpacity: 1,
+                toEndOpacity: 0,
+                timeRange: transitionRange
+            )
+            let incomingLayer = makeLayerInstruction(
+                for: segments[index + 1],
+                compositionTrack: videoTracks[(index + 1) % videoTracks.count],
+                at: startTimes[index + 1]
+            )
+            incomingLayer.setOpacityRamp(
+                fromStartOpacity: 0,
+                toEndOpacity: 1,
+                timeRange: transitionRange
+            )
+            instructions.append(makeVideoInstruction(
+                range: transitionRange,
+                layers: [incomingLayer, outgoingLayer]
+            ))
+        }
+
+        let totalDuration = endTimes.last ?? .zero
         let videoComposition = AVMutableVideoComposition()
         videoComposition.renderSize = canvas
         videoComposition.frameDuration = CMTime(value: 1, timescale: 30)
@@ -74,7 +136,7 @@ public enum VideoExporter {
         videoComposition.animationTool = try makeAnimationTool(
             settings: vfx,
             canvas: canvas,
-            totalDuration: CMTimeGetSeconds(cursor)
+            totalDuration: CMTimeGetSeconds(totalDuration)
         )
 
         var audioMix: AVMutableAudioMix?
@@ -92,7 +154,7 @@ public enum VideoExporter {
 
             let musicDuration = try await musicAsset.load(.duration)
             let musicSeconds = CMTimeGetSeconds(musicDuration)
-            let totalSeconds = CMTimeGetSeconds(cursor)
+            let totalSeconds = CMTimeGetSeconds(totalDuration)
             guard musicSeconds.isFinite, musicSeconds > 0, totalSeconds.isFinite, totalSeconds > 0 else {
                 throw ExportError.musicHasNoAudio
             }
@@ -154,6 +216,27 @@ public enum VideoExporter {
                 }
             }
         }
+    }
+
+    private static func makeLayerInstruction(
+        for segment: VideoSegment,
+        compositionTrack: AVCompositionTrack,
+        at startTime: CMTime
+    ) -> AVMutableVideoCompositionLayerInstruction {
+        let layer = AVMutableVideoCompositionLayerInstruction(assetTrack: compositionTrack)
+        layer.setTransform(segment.transform, at: startTime)
+        return layer
+    }
+
+    private static func makeVideoInstruction(
+        range: CMTimeRange,
+        layers: [AVVideoCompositionLayerInstruction]
+    ) -> AVMutableVideoCompositionInstruction {
+        let instruction = AVMutableVideoCompositionInstruction()
+        instruction.timeRange = range
+        instruction.backgroundColor = NSColor.black.cgColor
+        instruction.layerInstructions = layers
+        return instruction
     }
 
     private static func makeAnimationTool(
@@ -314,6 +397,14 @@ public enum VideoExporter {
         NSGraphicsContext.restoreGraphicsState()
         return bitmap.cgImage
     }
+}
+
+private struct VideoSegment {
+    let asset: AVURLAsset
+    let sourceTrack: AVAssetTrack
+    let sourceRange: CMTimeRange
+    let duration: CMTime
+    let transform: CGAffineTransform
 }
 
 private final class ExportSessionBox: @unchecked Sendable {

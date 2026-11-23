@@ -89,6 +89,7 @@ public struct PromoProject: Codable {
     public var clips: [TimelineClip]
     public var musicPath: String?
     public var musicVolume: Double
+    public var transitionDuration: Double
     public var vfx: VFXSettings
 
     public init(
@@ -97,6 +98,7 @@ public struct PromoProject: Codable {
         clips: [TimelineClip],
         musicPath: String? = nil,
         musicVolume: Double = 0.35,
+        transitionDuration: Double = 0.35,
         vfx: VFXSettings = VFXSettings()
     ) {
         self.version = version
@@ -104,6 +106,7 @@ public struct PromoProject: Codable {
         self.clips = clips
         self.musicPath = musicPath
         self.musicVolume = musicVolume
+        self.transitionDuration = transitionDuration
         self.vfx = vfx
     }
 
@@ -113,6 +116,7 @@ public struct PromoProject: Codable {
         case clips
         case musicPath
         case musicVolume
+        case transitionDuration
         case vfx
     }
 
@@ -123,6 +127,7 @@ public struct PromoProject: Codable {
         clips = try container.decode([TimelineClip].self, forKey: .clips)
         musicPath = try container.decodeIfPresent(String.self, forKey: .musicPath)
         musicVolume = try container.decodeIfPresent(Double.self, forKey: .musicVolume) ?? 0.35
+        transitionDuration = try container.decodeIfPresent(Double.self, forKey: .transitionDuration) ?? 0
         vfx = try container.decodeIfPresent(VFXSettings.self, forKey: .vfx) ?? VFXSettings()
     }
 }

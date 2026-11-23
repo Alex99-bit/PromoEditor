@@ -9,6 +9,8 @@ verticales a partir de videos existentes.
 - Previsualizar clips y añadirlos a una secuencia.
 - Cambiar el orden, quitar tomas y ajustar sus puntos de inicio y fin.
 - Exportar una secuencia vertical 9:16 en MP4 (1080 × 1920).
+- Aplicar un fundido cruzado configurable entre clips (0–1 s) o elegir corte
+  directo; proyectos anteriores conservan sus cortes.
 - Guardar y abrir proyectos `.json`; ese formato también permite que un
   asistente proponga o edite la lista de tomas.
 - Exportar proyectos desde Terminal con `PromoEditorCLI`, usando el mismo

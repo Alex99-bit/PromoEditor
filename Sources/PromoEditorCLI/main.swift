@@ -24,6 +24,7 @@ enum PromoEditorCLI {
                 to: URL(fileURLWithPath: outputPath),
                 musicURL: project.musicPath.map { URL(fileURLWithPath: $0) },
                 musicVolume: project.musicVolume,
+                transitionDuration: project.transitionDuration,
                 vfx: project.vfx,
                 overwriteExistingFile: arguments.contains("--overwrite")
             )

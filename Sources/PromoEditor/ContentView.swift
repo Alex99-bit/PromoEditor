@@ -256,6 +256,26 @@ struct ContentView: View {
                         .font(.system(size: 10))
                         .foregroundStyle(.secondary)
                 }
+
+                HStack(spacing: 7) {
+                    Label("TRANSICIÓN", systemImage: "arrow.triangle.2.circlepath")
+                        .font(.system(size: 10, weight: .bold))
+                        .tracking(0.4)
+                        .foregroundStyle(.secondary)
+                    Spacer(minLength: 0)
+                    Text(editor.transitionDuration < 0.025
+                        ? "Corte"
+                        : String(format: "%.2f s", editor.transitionDuration))
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                }
+                Slider(value: $editor.transitionDuration, in: 0...1, step: 0.05)
+                    .help("Duración del fundido cruzado entre clips; 0 desactiva la transición.")
+                Text(editor.transitionDuration < 0.025
+                    ? "Sin transición entre tomas."
+                    : "Fundido cruzado entre tomas consecutivas.")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.tertiary)
             }
             .padding(9)
             .background(Color.primary.opacity(0.035))
